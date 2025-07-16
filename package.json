@@ -1,0 +1,22 @@
+{
+  "name": "disco-lurker",
+  "version": "1.0.0",
+  "description": "local music bot",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Retrolous/disco-lurker.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Retrolous/disco-lurker/issues"
+  },
+  "homepage": "https://github.com/Retrolous/disco-lurker#readme",
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  }
+}
