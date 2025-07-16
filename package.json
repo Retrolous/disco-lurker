@@ -17,6 +17,9 @@
   },
   "homepage": "https://github.com/Retrolous/disco-lurker#readme",
   "dependencies": {
-    "discord.js": "^14.21.0"
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.18.0",
+    "discord.js": "^14.21.0",
+    "libsodium-wrappers": "^0.7.15"
   }
 }
