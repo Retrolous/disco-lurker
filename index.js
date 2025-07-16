@@ -1,6 +1,6 @@
 const { Client, Events, GatewayIntentBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, VoiceConnectionStatus } = require('@discordjs/voice');
-const { token } = require('./config.json');
+const { token, starting_directory } = require('./config.json');
 const { spawn } = require('child_process');
 require ('ffmpeg');
 
@@ -15,13 +15,13 @@ client.once(Events.ClientReady, readyClient =>
 
 client.login(token);
 
-
+let pwd = starting_directory;
 let connection;
 let resource;
 const player = createAudioPlayer();
 
 // slash commands would probably be better but i'm still stuck in 2020
-client.on('messageCreate', (message) =>
+client.on('messageCreate', async (message) =>
   {
     console.log("message received");
 
@@ -34,13 +34,23 @@ client.on('messageCreate', (message) =>
 
     
     if(message.content == "-list"){
-      let listProcess = spawn('ls')
+      let listProcess = spawn('ls', [pwd])
       listProcess.stdout.on('data', (data) => {
-      message.reply(data);
-});
-      
+      message.reply('```' + data.toString() + '```');
+    });
     }
-  }
+    
+    if(message.content.startsWith("-cd")){
+      console.log(message.content);
+      let cdArgs = message.content.toString().slice(4);
+      pwd += cdArgs;
+    }
+
+    if(message.content == '-resetdir'){
+      pwd = starting_directory;
+    }
+    }
+  
 );
 
 function handleConnection(message){
