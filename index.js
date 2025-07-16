@@ -8,7 +8,6 @@ const {
 } = require("@discordjs/voice");
 const { token, starting_directory } = require("./config.json");
 const { spawn } = require("child_process");
-require("ffmpeg");
 
 // Create a new client instance
 const client = new Client({
@@ -26,6 +25,7 @@ client.once(Events.ClientReady, (readyClient) => {
 
 client.login(token);
 
+let connected = false;
 let playing = false;
 let currentTextChannelId;
 let currentVoiceChannelId;
@@ -53,51 +53,74 @@ client.on("messageCreate", async (message) => {
 
   // join the author's channel
   if (message.content == "-join") {
+    currentTextChannelId = message.channel.id;
     handleConnection(message);
+  }
+
+  if (message.content == "-leave") {
+    currentTextChannelId = message.channel.id;
+    resetState();
   }
 
   // 
   if (message.content == "-list") {
+    currentTextChannelId = message.channel.id;
     listCurrentDirectory(message)
   }
 
   // output the current folder that the bot is in
   if (message.content == "-pwd") {
+    currentTextChannelId = message.channel.id;
     message.reply(pwd);
   }
 
   if (message.content == "-pause") {
+    currentTextChannelId = message.channel.id;
     player.pause();
   }
 
   // remove the current song from the queue (which will be the first) and play the next one
   if (message.content == "-skip") {
+    currentTextChannelId = message.channel.id;
     playlist.shift();
     playNextSong();
   }
 
   // if a message starts with cd
   if (message.content.startsWith("-cd")) {
+    currentTextChannelId = message.channel.id;
     changeDirectory(message);
   }
 
   if (message.content == "-resetdir") {
+    currentTextChannelId = message.channel.id;
     pwd = starting_directory;
   }
 
   if (message.content == "-queue") {
+    currentTextChannelId = message.channel.id;
     displayQueue(message);
   }
 
+  if (message.content == "-clear") {
+    currentTextChannelId = message.channel.id;
+    playlist.splice(1);
+  }
+
   if (message.content.startsWith("-play ")) {
+    currentTextChannelId = message.channel.id;
     handlePlaying(message);
+  }
+
+  if (message.content == ("-playfolder")) {
+    currentTextChannelId = message.channel.id;
+    handleMassPlaying(message);
   }
 });
 
 function handlePlaying(message){
-  if (connection == undefined || connection._state.status == "destroyed") {
-      message.reply("I'm not in a VC yet dingwad");
-      return;
+  if (!connection || connection._state.status === "destroyed") {
+      handleConnection(message);
     }
 
     let playArgs = message.content.toString().slice(6);
@@ -105,10 +128,7 @@ function handlePlaying(message){
     console.log("Path of file:" + filePath);
     playlist.push(filePath);
 
-    if (!playing) {
-      playing = true;
-      playNextSong();
-    }
+    attemptToPlay();
 }
 function handleConnection(message) {
   // ensure that the user is in a channel before attempting to join it
@@ -133,19 +153,20 @@ function handleConnection(message) {
 }
 
 function resetState(){
-  if (connection) connection.destroy();
+  if (connection && connection._state.status !== "destroyed") connection.destroy();
     player.stop()
     playlist = [];
-    pwd = starting_directory;
     playing = false;
     connected = false;
     currentVoiceChannelId = null;
     currentTextChannelId = null;
 }
 
+
+
 function playNextSong() {
-  if (playlist.length == 0) {
-    connection.destroy();
+  if (playlist.length == 0 && playing) {
+    resetState();
   }
 
   try{
@@ -176,8 +197,10 @@ function playNextSong() {
     console.error(`Error: ${error.message}`);
   });
   } catch{
-    client.channels.fetch(currentTextChannelId).send('There was an error playing your song.');
+    client.channels.cache.get(currentTextChannelId).send('There was an error playing your song.');
     playlist.shift();
+
+
     playNextSong();
   }
 }
@@ -191,7 +214,7 @@ function listCurrentDirectory(message){
 
     listProcess.stderr.on("data", (data) => {
       console.error(`stderr: ${data}`);
-      client.channels.fetch(currentTextChannelId).send('There was an error listing your directory. Try running -pwd.');
+      client.channels.cache.get(currentTextChannelId).send('There was an error listing your directory. Try running -pwd.');
     });
 }
 
@@ -209,4 +232,37 @@ function displayQueue(message){
       index++;
     })
     message.reply(replyMessage == "" ? "There's nothing to play." : "```" + replyMessage + "```");
+}
+
+function handleMassPlaying(message){
+  if (!connection || connection._state.status === "destroyed") {
+      handleConnection(message);
+    }
+
+  let fileList;
+  let listProcess = spawn("ls", [pwd]);
+    listProcess.stdout.on("data", (data) => {
+      console.log(data.toString());
+      console.log(data.toString().split("\n"));
+      console.log(data.toString().split("\n").filter(isAudioFile));
+      fileList = data.toString().split("\n").filter(isAudioFile);
+
+      if (fileList.length == 0) message.reply("There are no suitable files here.")
+      fileList.forEach((element) => playlist.push(pwd + `/` + element))
+
+      attemptToPlay();
+    });
+}
+
+function attemptToPlay(){
+  if (connected && playlist.length > 0 && !playing) {
+    playing = true;
+    playNextSong();
+  }
+}
+function isAudioFile(filePath) {
+  // these are just the ones that i have/had in my music collection, add more as you see fit or if ffmpeg supports them
+  const audioExtensions = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.webm', '.opus'];
+  const extension = filePath.toLowerCase().split('.').pop();
+  return audioExtensions.includes(`.${extension}`);
 }
