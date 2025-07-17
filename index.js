@@ -8,6 +8,7 @@ const {
 } = require("@discordjs/voice");
 const { token, starting_directory } = require("./config.json");
 const { spawn } = require("child_process");
+const path = require("path");
 
 // Create a new client instance
 const client = new Client({
@@ -32,6 +33,7 @@ let currentVoiceChannelId;
 let playlist = [];
 let pwd = starting_directory;
 let connection;
+
 const player = createAudioPlayer();
 
 // when the current song ends
@@ -44,92 +46,121 @@ player.on(AudioPlayerStatus.Idle, () => {
   }
 });
 
+player.on("error", (error) => {
+  console.error(`Error: ${error.message}`);
+});
+
 // slash commands would probably be better but i'm still stuck in 2020
+
 client.on("messageCreate", async (message) => {
   console.log("message received");
 
   // ignore own messages
   if (message.author.bot) return false;
 
-  // join the author's channel
-  if (message.content == "-join") {
-    currentTextChannelId = message.channel.id;
-    handleConnection(message);
+  currentTextChannelId = message.channel.id;
+
+  switch (message.content) {
+    case "-leave":
+      resetState();
+      break;
+    case "-ls":
+      listCurrentDirectory(message);
+      break;
+    case "-pwd": //output the current working directory
+      message.reply(pwd);
+      break;
+    case "-resetdir":
+      pwd = starting_directory;
+      break;
+    case "-queue":
+      displayQueue(message);
+      break;
+    case "-clear":
+      playlist.splice(1);
+      break;
+    case "-playfolder":
+      handleMassPlaying(message);
+      break;
+    case "-pause":
+      player.pause();
+      break;
+    case "-skip": // remove the current song from the queue (which will be the first) and play the next one
+      playlist.shift();
+      playNextSong();
+      break;
   }
 
-  if (message.content == "-leave") {
-    currentTextChannelId = message.channel.id;
-    resetState();
-  }
-
-  //
-  if (message.content == "-list") {
-    currentTextChannelId = message.channel.id;
-    listCurrentDirectory(message);
-  }
-
-  // output the current folder that the bot is in
-  if (message.content == "-pwd") {
-    currentTextChannelId = message.channel.id;
-    message.reply(pwd);
-  }
-
-  if (message.content == "-pause") {
-    currentTextChannelId = message.channel.id;
-    player.pause();
-  }
-
-  // remove the current song from the queue (which will be the first) and play the next one
-  if (message.content == "-skip") {
-    currentTextChannelId = message.channel.id;
-    playlist.shift();
-    playNextSong();
-  }
-
-  // if a message starts with cd
   if (message.content.startsWith("-cd")) {
-    currentTextChannelId = message.channel.id;
     changeDirectory(message);
   }
 
-  if (message.content == "-resetdir") {
-    currentTextChannelId = message.channel.id;
-    pwd = starting_directory;
-  }
-
-  if (message.content == "-queue") {
-    currentTextChannelId = message.channel.id;
-    displayQueue(message);
-  }
-
-  if (message.content == "-clear") {
-    currentTextChannelId = message.channel.id;
-    playlist.splice(1);
-  }
-
   if (message.content.startsWith("-play ")) {
-    currentTextChannelId = message.channel.id;
     handlePlaying(message);
   }
 
-  if (message.content == "-playfolder") {
-    currentTextChannelId = message.channel.id;
-    handleMassPlaying(message);
+  if (message.content.startsWith("-seek ")) {
+    handleSeeking(message);
+  }
+
+  if(message.content.startsWith("-remove ")){
+    handleRemoving(message);
   }
 });
 
+function handleSeeking(message){
+  let seekArgs = message.content.toString().slice(6);
+  if(isNaN(seekArgs)) message.reply("Not a valid position.");
+    const ffmpeg = spawn("ffmpeg", [
+      "-i",
+      playlist[0],
+      "-f",
+      "s16le",
+      "-ar",
+      "48000",
+      "-ac",
+      "2",
+      "-ss",
+      seekArgs.toString(),
+      "pipe:1",
+      
+    ]);
+
+    ffmpeg.stderr.on("data", (data) => {
+      console.error(`stderr: ${data}`);
+    });
+
+    const resource = createAudioResource(ffmpeg.stdout, {
+      inputType: StreamType.Raw,
+    });
+
+    player.play(resource);
+}
+
+function handleRemoving(message){
+  let removeArgs = message.content.toString().slice(8);
+  if(isNaN(removeArgs) || playlist.length < removeArgs) message.reply("Not a valid position.");
+  if(removeArgs == "1") { playlist.shift(); playNextSong(); }
+  playlist.splice(removeArgs - 1, 1);
+}
+
 function handlePlaying(message) {
-  if (!connection || connection._state.status === "destroyed") {
+  if (!connected) {
     handleConnection(message);
   }
 
   let playArgs = message.content.toString().slice(6);
-  const filePath = pwd + "/" + playArgs;
-  console.log("Path of file:" + filePath);
+  const filePath = path.resolve(pwd, playArgs);
+  if (!filePath.startsWith(starting_directory)) {
+    message.reply("Access outside the base directory is not allowed.");
+    return;
+  }
+
   playlist.push(filePath);
 
   attemptToPlay();
 }
+
 function handleConnection(message) {
   // ensure that the user is in a channel before attempting to join it
   if (
@@ -168,7 +199,10 @@ function resetState() {
 function playNextSong() {
   if (playlist.length == 0 && playing) {
     resetState();
+    return;
   }
+
+  playing = true;
 
   try {
     const ffmpeg = spawn("ffmpeg", [
@@ -193,10 +227,6 @@ function playNextSong() {
 
     player.play(resource);
     connection.subscribe(player);
-
-    player.on("error", (error) => {
-      console.error(`Error: ${error.message}`);
-    });
   } catch {
     client.channels.cache
       .get(currentTextChannelId)
@@ -213,7 +243,7 @@ function listCurrentDirectory(message) {
   listProcess.stdout.on("data", (data) => {
     message.reply(
       data.toString() != ""
-        ? "```" + data.toString() + "```"
+        ? "```" + data.toString().substring(0, 1990) + "\u2026" + "```"
         : "There are no files here."
     );
   });
@@ -227,9 +257,15 @@ function listCurrentDirectory(message) {
 }
 
 function changeDirectory(message) {
-  console.log(message.content);
-  let cdArgs = message.content.toString().slice(4);
-  pwd += "/" + cdArgs;
+  let cdArgs = message.content.toString().slice(4).trim();
+  const newPath = path.resolve(pwd, cdArgs);
+
+  if (!newPath.startsWith(starting_directory)) {
+    message.reply("Access outside the base directory is not allowed.");
+    return;
+  }
+
+  pwd = newPath;
 }
 
 function displayQueue(message) {
@@ -242,27 +278,30 @@ function displayQueue(message) {
   message.reply(
     replyMessage == ""
       ? "There's nothing to play."
-      : "```" + replyMessage + "```"
+      : "```" + replyMessage.substring(0, 1990) + "```"
   );
 }
 
 function handleMassPlaying(message) {
-  if (!connection || connection._state.status === "destroyed") {
+  if (!connected) {
     handleConnection(message);
   }
 
-  let fileList;
-  let listProcess = spawn("ls", [pwd]);
+  const listProcess = spawn("ls", [pwd]);
+  let dataBuffer = "";
+
   listProcess.stdout.on("data", (data) => {
-    console.log(data.toString());
-    console.log(data.toString().split("\n"));
-    console.log(data.toString().split("\n").filter(isAudioFile));
-    fileList = data.toString().split("\n").filter(isAudioFile);
+    dataBuffer += data.toString();
+  });
 
-    if (fileList.length == 0)
+  listProcess.on("close", () => {
+    const files = dataBuffer.split("\n").filter(isAudioFile);
+    if (files.length === 0) {
       message.reply("There are no suitable files here.");
-    fileList.forEach((element) => playlist.push(pwd + `/` + element));
+      return;
+    }
 
+    files.forEach((f) => playlist.push(path.join(pwd, f)));
     attemptToPlay();
   });
 }
