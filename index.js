@@ -86,8 +86,12 @@ client.on("messageCreate", async (message) => {
       player.pause();
       break;
     case "-skip": // remove the current song from the queue (which will be the first) and play the next one
-      playlist.shift();
-      playNextSong();
+      if(playlist.length > 0){
+        playlist.shift();
+        playNextSong();
+      } else {
+        message.reply("You need to play a song to skip it.")
+      }
       break;
   }
 
@@ -106,7 +110,18 @@ client.on("messageCreate", async (message) => {
   if(message.content.startsWith("-remove ")){
     handleRemoving(message);
   }
+
+  if(message.content.startsWith("-skipto ")){
+    handleSkippingTo(message);
+  }
 });
+
+function handleSkippingTo(message){
+    let skiptoArgs = message.content.toString().slice(8);
+    if(isNaN(skiptoArgs) || playlist.length < skiptoArgs) message.reply("Not a valid position.");
+    playlist.splice(0, skiptoArgs - 1);
+    playNextSong();
+}
 
 function handleSeeking(message){
   let seekArgs = message.content.toString().slice(6);
@@ -275,11 +290,23 @@ function displayQueue(message) {
     replyMessage += `\n${index} - ${element}`;
     index++;
   });
-  message.reply(
-    replyMessage == ""
-      ? "There's nothing to play."
-      : "```" + replyMessage.substring(0, 1990) + "```"
-  );
+
+  if(replyMessage == "") message.reply("There's nothing to play.");
+  else replyInChunks(message, replyMessage);
+}
+
+function replyInChunks(message, text){
+  let lines = text.split('\n');
+  let currentMessage = "";
+  for(i = 0; i < lines.length; i++){
+    let newMessage = currentMessage + lines[i] + '\n';
+    if(newMessage.length > 1990) {
+      message.reply('```' + currentMessage + '```');
+      currentMessage = lines[i] + '\n';
+    }
+    else(currentMessage = newMessage);
+  }
+  if(currentMessage !== "") message.reply('```' + currentMessage + '```');
 }
 
 function handleMassPlaying(message) {
@@ -327,3 +354,4 @@ function isAudioFile(filePath) {
   const extension = filePath.toLowerCase().split(".").pop();
   return audioExtensions.includes(`.${extension}`);
 }
+
