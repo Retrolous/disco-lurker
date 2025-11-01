@@ -8,9 +8,10 @@ const {
 } = require("@discordjs/voice");
 const { token, starting_directory } = require("./config.json");
 const { spawn } = require("child_process");
-const path = require("path");
+const path = require("node:path");
+const fs = require('node:fs');
 
-// Create a new client instance
+// create a new client instance
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -28,10 +29,10 @@ client.login(token);
 
 let connected = false;
 let playing = false;
-let currentTextChannelId;
-let currentVoiceChannelId;
+let currentTextChannelID;
+let currentVoiceChannelID;
 let playlist = [];
-let pwd = starting_directory;
+let wd = starting_directory;
 let connection;
 
 const player = createAudioPlayer();
@@ -67,11 +68,11 @@ client.on("messageCreate", async (message) => {
     case "-ls":
       listCurrentDirectory(message);
       break;
-    case "-pwd": //output the current working directory
-      message.reply(pwd);
+    case "-wd": //output the current working directory
+      message.reply(wd);
       break;
     case "-resetdir":
-      pwd = starting_directory;
+      wd = starting_directory;
       break;
     case "-queue":
       displayQueue(message);
@@ -165,7 +166,7 @@ function handlePlaying(message) {
   }
 
   let playArgs = message.content.toString().slice(6);
-  const filePath = path.resolve(pwd, playArgs);
+  const filePath = path.resolve(wd, playArgs);
   if (!filePath.startsWith(starting_directory)) {
     message.reply("Access outside the base directory is not allowed.");
     return;
@@ -253,8 +254,8 @@ function playNextSong() {
 }
 
 function listCurrentDirectory(message) {
-  console.log(`'${pwd}'`);
-  let listProcess = spawn("ls", [pwd]);
+  console.log(`'${wd}'`);
+  let listProcess = spawn("ls", [wd]);
   listProcess.stdout.on("data", (data) => {
     message.reply(
       data.toString() != ""
@@ -267,20 +268,20 @@ function listCurrentDirectory(message) {
     console.error(`stderr: ${data}`);
     client.channels.cache
       .get(currentTextChannelId)
-      .send("There was an error listing your directory. Try running -pwd.");
+      .send("There was an error listing your directory. Try running -wd.");
   });
 }
 
 function changeDirectory(message) {
   let cdArgs = message.content.toString().slice(4).trim();
-  const newPath = path.resolve(pwd, cdArgs);
+  const newPath = path.resolve(wd, cdArgs);
 
   if (!newPath.startsWith(starting_directory)) {
     message.reply("Access outside the base directory is not allowed.");
     return;
   }
 
-  pwd = newPath;
+  wd = newPath;
 }
 
 function displayQueue(message) {
@@ -314,7 +315,7 @@ function handleMassPlaying(message) {
     handleConnection(message);
   }
 
-  const listProcess = spawn("ls", [pwd]);
+  const listProcess = spawn("ls", [wd]);
   let dataBuffer = "";
 
   listProcess.stdout.on("data", (data) => {
@@ -328,7 +329,7 @@ function handleMassPlaying(message) {
       return;
     }
 
-    files.forEach((f) => playlist.push(path.join(pwd, f)));
+    files.forEach((f) => playlist.push(path.join(wd, f)));
     attemptToPlay();
   });
 }
