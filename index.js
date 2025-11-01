@@ -1,4 +1,10 @@
+//#region Imports
+
+// necessary to allow the bot to interact with guilds
+const { token, starting_directory } = require("./config.json");
 const { Client, Events, GatewayIntentBits, Collection, MessageFlags } = require("discord.js");
+
+// basics for running and maintaining an audio stream
 const {
   joinVoiceChannel,
   createAudioPlayer,
@@ -6,44 +12,92 @@ const {
   StreamType,
   AudioPlayerStatus,
 } = require("@discordjs/voice");
-const { token, starting_directory } = require("./config.json");
+
+// modules necessary for interacting with the file system
+// used both for commands and streaming audio
 const { spawn } = require("child_process");
 const path = require("node:path");
 const fs = require('node:fs');
+const { start } = require("node:repl");
 
-client.commands = new Collection(); 
+//#endregion
 
+//#region Client set-up
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
+  ],
+});
+
+// store commands in a map, so they can be easily referenced by name
+client.commands = new Collection();
+
+// store any relevant information regarding playing status  
+client.player = {
+  connected: false,
+  playing: false,
+  workingTextChannelID: undefined,
+  workingVoiceChannelID: undefined,
+  playlist: [],
+  // working directory
+  wd: starting_directory,
+  connection: undefined,
+  player: createAudioPlayer()
+}
+
+client.once(Events.ClientReady, (readyClient) => {
+  console.log(`${readyClient.user.tag}`);
+});
+
+client.login(token);
+//#endregion
+
+//#region Command set-up
+// get the list of command folders i.e. subsections
 const foldersPath = path.join(__dirname, 'commands');
 const commandFolders = fs.readdirSync(foldersPath);
 
+// for each subsection
 for (const folder of commandFolders) {
+  // get the list of commands i.e. js files
 	const commandsPath = path.join(foldersPath, folder);
 	const commandFiles = fs.readdirSync(commandsPath).filter((file) => file.endsWith('.js'));
+
+  // for each command
 	for (const file of commandFiles) {
 		const filePath = path.join(commandsPath, file);
+    // load it and save it within the Collection with the key as the command name and value as exported module (slash command and ex function)
 		const command = require(filePath);
-		// Set a new item in the Collection with the key as the command name and the value as the exported module
 		if ('data' in command && 'execute' in command) {
 			client.commands.set(command.data.name, command);
 		} else {
+      // ensure commands are properly formatted
 			console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
 		}
 	}
 }
 
-client.on(Events.InteractionCreate, (interaction) => {
+// if the user creates a slash command
+client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return; 
   const command = interaction.client.commands.get(interaction.commandName);
 
+  // if the command doesn't exist
 	if (!command) {
 		console.error(`No command matching ${interaction.commandName} was found.`);
 		return;
 	}
 
 	try {
+    // attempt to execute it
 		await command.execute(interaction);
 	} catch (error) {
 		console.error(error);
+
+    // if there was an initial reply
 		if (interaction.replied || interaction.deferred) {
 			await interaction.followUp({
 				content: 'There was an error while executing this command!',
@@ -59,34 +113,10 @@ client.on(Events.InteractionCreate, (interaction) => {
 	console.log(interaction);
 });
 
-// create a new client instance
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates,
-  ],
-});
-
-client.once(Events.ClientReady, (readyClient) => {
-  console.log(`${readyClient.user.tag}`);
-});
-
-client.login(token);
-
-let connected = false;
-let playing = false;
-let currentTextChannelID;
-let currentVoiceChannelID;
-let playlist = [];
-let wd = starting_directory;
-let connection;
-
-const player = createAudioPlayer();
+//#endregion
 
 // when the current song ends
-player.on(AudioPlayerStatus.Idle, () => {
+client.player.player.on(AudioPlayerStatus.Idle, () => {
   try {
     playlist.shift();
     playNextSong();
@@ -95,75 +125,69 @@ player.on(AudioPlayerStatus.Idle, () => {
   }
 });
 
-player.on("error", (error) => {
+client.player.player.on("error", (error) => {
   console.error(`Error: ${error.message}`);
 });
 
-// slash commands would probably be better but i'm still stuck in 2020
+// // slash commands would probably be better but i'm still stuck in 2020
 
-client.on("messageCreate", async (message) => {
-  console.log("message received");
 
-  // ignore own messages
-  if (message.author.bot) return false;
+//   currentTextChannelId = message.channel.id;
 
-  currentTextChannelId = message.channel.id;
+//   switch (message.content) {
+//     case "-leave":
+//       resetState();
+//       break;
+//     case "-ls":
+//       listCurrentDirectory(message);
+//       break;
+//     case "-wd": //output the current working directory
+//       message.reply(wd);
+//       break;
+//     case "-resetdir":
+//       wd = starting_directory;
+//       break;
+//     case "-queue":
+//       displayQueue(message);
+//       break;
+//     case "-clear":
+//       playlist.splice(1);
+//       break;
+//     case "-playfolder":
+//       handleMassPlaying(message);
+//       break;
+//     case "-pause":
+//       player.pause();
+//       break;
+//     case "-skip": // remove the current song from the queue (which will be the first) and play the next one
+//       if(playlist.length > 0){
+//         playlist.shift();
+//         playNextSong();
+//       } else {
+//         message.reply("You need to play a song to skip it.")
+//       }
+//       break;
+//   }
 
-  switch (message.content) {
-    case "-leave":
-      resetState();
-      break;
-    case "-ls":
-      listCurrentDirectory(message);
-      break;
-    case "-wd": //output the current working directory
-      message.reply(wd);
-      break;
-    case "-resetdir":
-      wd = starting_directory;
-      break;
-    case "-queue":
-      displayQueue(message);
-      break;
-    case "-clear":
-      playlist.splice(1);
-      break;
-    case "-playfolder":
-      handleMassPlaying(message);
-      break;
-    case "-pause":
-      player.pause();
-      break;
-    case "-skip": // remove the current song from the queue (which will be the first) and play the next one
-      if(playlist.length > 0){
-        playlist.shift();
-        playNextSong();
-      } else {
-        message.reply("You need to play a song to skip it.")
-      }
-      break;
-  }
+//   if (message.content.startsWith("-cd")) {
+//     changeDirectory(message);
+//   }
 
-  if (message.content.startsWith("-cd")) {
-    changeDirectory(message);
-  }
+//   if (message.content.startsWith("-play ")) {
+//     handlePlaying(message);
+//   }
 
-  if (message.content.startsWith("-play ")) {
-    handlePlaying(message);
-  }
+//   if (message.content.startsWith("-seek ")) {
+//     handleSeeking(message);
+//   }
 
-  if (message.content.startsWith("-seek ")) {
-    handleSeeking(message);
-  }
+//   if(message.content.startsWith("-remove ")){
+//     handleRemoving(message);
+//   }
 
-  if(message.content.startsWith("-remove ")){
-    handleRemoving(message);
-  }
-
-  if(message.content.startsWith("-skipto ")){
-    handleSkippingTo(message);
-  }
-});
+//   if(message.content.startsWith("-skipto ")){
+//     handleSkippingTo(message);
+//   }
 
 function handleSkippingTo(message){
     let skiptoArgs = message.content.toString().slice(8);
@@ -227,26 +251,7 @@ function handlePlaying(message) {
 
 function handleConnection(message) {
   // ensure that the user is in a channel before attempting to join it
-  if (
-    message.member.voice.channel &&
-    message.member.voice.channel.id != currentVoiceChannelId
-  ) {
-    // destroy any existing connection and player
-    resetState();
-    // join the author's channel
-    currentVoiceChannelId = message.member.voice.channel.id;
-    currentTextChannelId = message.channel.id;
-    connection = joinVoiceChannel({
-      channelId: message.member.voice.channel.id,
-      guildId: message.guild.id,
-      adapterCreator: message.guild.voiceAdapterCreator,
-    });
-    connected = true;
-  } else if (message.member.voice.channel.id == currentVoiceChannelId) {
-    message.reply("Can only join a different channel");
-  } else {
-    message.reply("You need to be in a channel first.");
-  }
+  
 }
 
 function resetState() {
